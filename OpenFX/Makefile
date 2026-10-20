@@ -2,6 +2,7 @@
 #   make            build the bundle
 #   make install    copy it to the system OpenFX folder (needs sudo)
 #   make link       symlink the system OpenFX folder to this build (needs sudo once)
+#   make release    copy the built bundle to ../Plugin for distribution
 
 UNAME_SYSTEM := $(shell uname -s)
 
@@ -67,4 +68,9 @@ link: PowerCollage.ofx
 	rm -rf "$(OFX_PLUGINS)/PowerCollage.ofx.bundle"
 	ln -s "$(CURDIR)/PowerCollage.ofx.bundle" "$(OFX_PLUGINS)/PowerCollage.ofx.bundle"
 
-.PHONY: all clean install link
+release: PowerCollage.ofx
+	rm -rf ../Plugin/PowerCollage.ofx.bundle
+	mkdir -p ../Plugin
+	cp -R PowerCollage.ofx.bundle ../Plugin/
+
+.PHONY: all clean install link release

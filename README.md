@@ -29,7 +29,9 @@ Pfade für die manuelle Installation:
 
 Dieselbe Collage gibt es auch als OpenFX-Plugin. Es erscheint im Effects-Reiter unter **Open FX > Power Collage**, genau wie Video Collage, und funktioniert auch auf der Color-Page. Im Viewer (Overlay "Open FX") lassen sich die Trennlinien direkt bearbeiten: am Kreuz ziehen verschiebt die Linien, am Kreis daneben ziehen dreht sie.
 
-Bauen und installieren (macOS, braucht Xcode und das OpenFX-SDK, das Resolve unter `/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/OpenFX` mitliefert):
+**Fertiges Plugin installieren (ohne Xcode):** Das kompilierte Plugin liegt in `Plugin/PowerCollage.ofx.bundle` (macOS 11 oder neuer, Apple Silicon und Intel). Repository herunterladen, `install-openfx.command` per Doppelklick starten, Admin-Passwort eingeben und Resolve neu starten. Falls macOS den Doppelklick blockiert: Rechtsklick auf die Datei, dann *Öffnen*. Das Skript kopiert das Plugin nach `/Library/OFX/Plugins` und entfernt die Download-Sperre, die macOS sonst auf heruntergeladene Plugins legt.
+
+Selbst bauen und installieren (macOS, braucht Xcode und das OpenFX-SDK, das Resolve unter `/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/OpenFX` mitliefert):
 
 ```bash
 cd OpenFX
@@ -37,7 +39,7 @@ make
 sudo make install
 ```
 
-Danach Resolve neu starten. Statt `install` verlinkt `sudo make link` den Systemordner einmalig auf den Build im Repository. Danach reicht nach jeder Änderung `make` und ein Neustart von Resolve.
+Danach Resolve neu starten. Statt `install` verlinkt `sudo make link` den Systemordner einmalig auf den Build im Repository. Danach reicht nach jeder Änderung `make` und ein Neustart von Resolve. `make release` aktualisiert das fertige Plugin in `Plugin/` für die Weitergabe.
 
 Das Plugin rechnet auf dem Mac per Metal auf der GPU. Auf anderen Systemen fällt es auf die CPU zurück, ein CUDA- oder OpenCL-Pfad fehlt noch. Ein Schlagschatten ist nicht eingebaut, dafür legst du in der Edit-Page zusätzlich das Resolve FX **Drop Shadow** auf den Clip.
 
