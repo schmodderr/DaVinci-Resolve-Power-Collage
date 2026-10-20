@@ -1,0 +1,288 @@
+{
+	Tools = ordered() {
+		PowerCollage = GroupOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			Inputs = ordered() {
+				Input1 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "Workflow",
+				},
+				Input2 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "PreviewLayout",
+				},
+				Input3 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "ActiveTile",
+					Default = 1,
+				},
+				Input4 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "LayoutLabel",
+				},
+				Input5 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "Tiles",
+					Default = 2,
+				},
+				Input6 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "Angle",
+					Default = 45,
+				},
+				Input7 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "Center",
+					DefaultX = 0.5,
+					DefaultY = 0.5,
+				},
+				Input8 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "Spacing",
+					Default = 0,
+				},
+				Input9 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "Margins",
+					Default = 0,
+				},
+				Input10 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "Rounding",
+					Default = 0,
+				},
+				Input11 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "Softness",
+					Default = 0,
+				},
+				Input12 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "ContentLabel",
+				},
+				Input13 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "MoveWithTile",
+				},
+				Input14 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "Zoom",
+					Default = 1,
+				},
+				Input15 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "OffsetX",
+					Default = 0,
+				},
+				Input16 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "OffsetY",
+					Default = 0,
+				},
+				Input17 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "ContentEdges",
+				},
+				Input18 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "StylingLabel",
+				},
+				Input19 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "BorderWidth",
+					Default = 0,
+				},
+				Input20 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "BorderOnFrameEdges",
+				},
+				Input21 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "BorderRed",
+					Name = "Border Color",
+					ControlGroup = 1,
+					Default = 1,
+				},
+				Input22 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "BorderGreen",
+					Name = "Border Color",
+					ControlGroup = 1,
+					Default = 1,
+				},
+				Input23 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "BorderBlue",
+					Name = "Border Color",
+					ControlGroup = 1,
+					Default = 1,
+				},
+				Input24 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "BorderAlpha",
+					Name = "Border Color",
+					ControlGroup = 1,
+					Default = 1,
+				},
+				Input25 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "BackgroundUsesBorderColor",
+				},
+				Input26 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "DrawFill",
+				},
+				Input27 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "FillRed",
+					Name = "Fill Color",
+					ControlGroup = 2,
+					Default = 0,
+				},
+				Input28 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "FillGreen",
+					Name = "Fill Color",
+					ControlGroup = 2,
+					Default = 0,
+				},
+				Input29 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "FillBlue",
+					Name = "Fill Color",
+					ControlGroup = 2,
+					Default = 0,
+				},
+				Input30 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "FillAlpha",
+					Name = "Fill Color",
+					ControlGroup = 2,
+					Default = 1,
+				},
+				Input31 = InstanceInput {
+					SourceOp = "DropShadow1",
+					Source = "Shadow",
+					Page = "Controls",
+				},
+				Input32 = InstanceInput {
+					SourceOp = "DropShadow1",
+					Source = "shadowStrength",
+					Name = "Shadow Strength",
+					Default = 0,
+				},
+				Input33 = InstanceInput {
+					SourceOp = "DropShadow1",
+					Source = "shadowAngle",
+					Name = "Shadow Angle",
+					Default = 37.5,
+				},
+				Input34 = InstanceInput {
+					SourceOp = "DropShadow1",
+					Source = "ShadowDistance",
+					Name = "Shadow Distance",
+					Default = 0.02,
+					MaxScale = 0.2,
+				},
+				Input35 = InstanceInput {
+					SourceOp = "DropShadow1",
+					Source = "shadowBlur",
+					Name = "Shadow Blur",
+					Default = 0.55,
+				},
+				Input36 = InstanceInput {
+					SourceOp = "DropShadow1",
+					Source = "shadowColorRed",
+					Name = "Shadow Color",
+					ControlGroup = 3,
+					Default = 0,
+				},
+				Input37 = InstanceInput {
+					SourceOp = "DropShadow1",
+					Source = "shadowColorGreen",
+					Name = "Shadow Color",
+					ControlGroup = 3,
+					Default = 0,
+				},
+				Input38 = InstanceInput {
+					SourceOp = "DropShadow1",
+					Source = "shadowColorBlue",
+					Name = "Shadow Color",
+					ControlGroup = 3,
+					Default = 0,
+				},
+				MainInput1 = InstanceInput {
+					SourceOp = "PowerCollage1",
+					Source = "Input",
+				}
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "DropShadow1",
+					Source = "Output",
+				}
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+				Flags = {
+					AllowPan = false,
+					ConnectedSnap = true,
+					AutoSnap = true,
+					RemoveRouters = true
+				},
+				Size = { 456, 100, 228, 24.2424 },
+				Direction = "Horizontal",
+				PipeStyle = "Direct",
+				Scale = 1,
+				Offset = { 0, 0 }
+			},
+			Tools = ordered() {
+				PowerCollage1 = Fuse.PowerCollage {
+					CtrlWShown = false,
+					ViewInfo = OperatorInfo { Pos = { -110, 10 } },
+				},
+				DropShadow1 = ofx.com.blackmagicdesign.resolvefx.DropShadow {
+					CtrlWShown = false,
+					Inputs = {
+						Source = Input {
+							SourceOp = "PowerCollage1",
+							Source = "Output",
+						},
+						shadowStrength = Input { Value = 0, },
+						shadowAngle = Input { Value = 37.5, },
+						ShadowDistance = Input { Value = 0.02, },
+						shadowBlur = Input { Value = 0.55, },
+						shadowColorRed = Input { Value = 0, },
+						shadowColorGreen = Input { Value = 0, },
+						shadowColorBlue = Input { Value = 0, },
+						isLegacyComp = Input { Value = 0, },
+						blendGroup = Input { Value = 0, },
+						blendIn = Input { Value = 1, },
+						blend = Input { Value = 0, },
+						ignoreContentShape = Input { Value = 0, },
+						legacyIsProcessRGBOnly = Input { Value = 0, },
+						IsNoTemporalFramesReqd = Input { Value = 0, },
+						refreshTrigger = Input { Value = 1, },
+						srcProcessingAlphaMode = Input { Value = 0, },
+						dstProcessingAlphaMode = Input { Value = 0, },
+						resolvefxVersion = Input { Value = "2.0", }
+					},
+					ViewInfo = OperatorInfo { Pos = { 55, 10 } },
+					UserControls = ordered() {
+						Shadow = {
+							INP_Integer = false,
+							LBLC_DropDownButton = true,
+							LINKID_DataType = "Number",
+							LBLC_NumInputs = 7,
+							INP_External = false,
+							INPID_InputControl = "LabelControl",
+							LINKS_Name = "Drop Shadow",
+						}
+					}
+				}
+			},
+		}
+	},
+	ActiveTool = "PowerCollage"
+}

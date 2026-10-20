@@ -1,0 +1,601 @@
+--[[--
+Power Collage
+
+Diagonal split-screen collage for DaVinci Resolve. Works like the native
+Resolve FX "Video Collage": apply it to every clip of the collage, give each
+clip its own Active Tile, and optionally apply it in "Create Background" mode to
+a clip on top to get a frame with holes. Unlike Video Collage the tiles are
+separated by parallel dividers at an adjustable angle.
+
+All geometry is computed in Lua once per frame (tile polygons, centroids), the
+per-pixel work runs in a GPU kernel.
+--]]--
+
+local MAX_TILES = 8
+local MAX_VERTS = 8
+local BIG = 1.0e7
+
+FuRegisterClass("PowerCollage", CT_Tool, {
+	REGS_Name = "Power Collage",
+	REGS_Category = "Fuses",
+	REGS_OpIconString = "PwC",
+	REGS_OpDescription = "Diagonal split-screen collage with adjustable angle",
+	REGS_Company = "Podstars",
+	REG_NoMotionBlurCtrls = true,
+	REG_NoObjMatCtrls = true,
+	REG_OpNoMask = true,
+	REG_NoPreCalcProcess = true,
+	REG_SupportsDoD = false,
+	REG_Version = 100,
+})
+
+PowerCollageParams = [[
+	int width;
+	int height;
+	int mode;
+	int preview;
+	int tiles;
+	int active;
+	int fill;
+	int useColor;
+	float soft;
+	float rOuter;
+	float rContent;
+	float outline;
+	float ccx;
+	float ccy;
+	float scale;
+	float bc[4];
+	float fc[4];
+	int nO[8];
+	float polyO[128];
+	int nC;
+	float polyC[16];
+	float tcx[8];
+	float tcy[8];
+	float digitSize;
+]]
+
+PowerCollageKernel = [[
+// Signed distance to a polygon, negative inside (after Inigo Quilez).
+__DEVICE__ float sdPolyO(__CONSTANTREF__ PowerCollageParams *params, int t, float px, float py)
+{
+	int n = params->nO[t];
+	if (n < 3) return 1.0e7f;
+	int base = t * 16;
+	float vx0 = params->polyO[base + 0];
+	float vy0 = params->polyO[base + 1];
+	float d = (px - vx0) * (px - vx0) + (py - vy0) * (py - vy0);
+	float s = 1.0f;
+	for (int i = 0, j = n - 1; i < n; j = i, i++) {
+		float vix = params->polyO[base + i * 2];
+		float viy = params->polyO[base + i * 2 + 1];
+		float vjx = params->polyO[base + j * 2];
+		float vjy = params->polyO[base + j * 2 + 1];
+		float ex = vjx - vix, ey = vjy - viy;
+		float wx = px - vix, wy = py - viy;
+		float h = _saturatef((wx * ex + wy * ey) / (ex * ex + ey * ey));
+		float bx = wx - ex * h, by = wy - ey * h;
+		d = _fminf(d, bx * bx + by * by);
+		bool c1 = py >= viy;
+		bool c2 = py < vjy;
+		bool c3 = ex * wy > ey * wx;
+		if ((c1 && c2 && c3) || (!c1 && !c2 && !c3)) s = -s;
+	}
+	return s * _sqrtf(d);
+}
+
+__DEVICE__ float sdPolyC(__CONSTANTREF__ PowerCollageParams *params, float px, float py)
+{
+	int n = params->nC;
+	if (n < 3) return 1.0e7f;
+	float vx0 = params->polyC[0];
+	float vy0 = params->polyC[1];
+	float d = (px - vx0) * (px - vx0) + (py - vy0) * (py - vy0);
+	float s = 1.0f;
+	for (int i = 0, j = n - 1; i < n; j = i, i++) {
+		float vix = params->polyC[i * 2];
+		float viy = params->polyC[i * 2 + 1];
+		float vjx = params->polyC[j * 2];
+		float vjy = params->polyC[j * 2 + 1];
+		float ex = vjx - vix, ey = vjy - viy;
+		float wx = px - vix, wy = py - viy;
+		float h = _saturatef((wx * ex + wy * ey) / (ex * ex + ey * ey));
+		float bx = wx - ex * h, by = wy - ey * h;
+		d = _fminf(d, bx * bx + by * by);
+		bool c1 = py >= viy;
+		bool c2 = py < vjy;
+		bool c3 = ex * wy > ey * wx;
+		if ((c1 && c2 && c3) || (!c1 && !c2 && !c3)) s = -s;
+	}
+	return s * _sqrtf(d);
+}
+
+// Coverage of an inside-positive distance, antialiased over "soft" pixels.
+__DEVICE__ float coverage(float sd, float soft)
+{
+	return _saturatef(sd / soft + 0.5f);
+}
+
+// 3x5 bitmap digits 1..8, rows top to bottom, 3 bits per row.
+__DEVICE__ int digitBits(int n)
+{
+	if (n == 1) return 11415;
+	if (n == 2) return 29671;
+	if (n == 3) return 29647;
+	if (n == 4) return 23497;
+	if (n == 5) return 31183;
+	if (n == 6) return 31215;
+	if (n == 7) return 29257;
+	return 31727;
+}
+
+__DEVICE__ float digitMask(int n, float px, float py, float cx, float cy, float size)
+{
+	float unit = size / 5.0f;
+	float gx = (px - cx) / unit + 1.5f;
+	float gy = (cy - py) / unit + 2.5f;
+	if (gx < 0.0f || gx >= 3.0f || gy < 0.0f || gy >= 5.0f) return 0.0f;
+	int col = (int)gx;
+	int row = (int)gy;
+	int bit = (digitBits(n) >> ((4 - row) * 3 + (2 - col))) & 1;
+	return (float)bit;
+}
+
+__KERNEL__ void PowerCollageKernel(__CONSTANTREF__ PowerCollageParams *params, __TEXTURE2D__ src, __TEXTURE2D_WRITE__ dst)
+{
+	DEFINE_KERNEL_ITERATORS_XY(x, y);
+	if (x < params->width && y < params->height)
+	{
+		float W = (float)params->width;
+		float H = (float)params->height;
+		float px = (float)x + 0.5f - 0.5f * W;
+		float py = (float)y + 0.5f - 0.5f * H;
+		float soft = params->soft;
+		float4 outc = to_float4(0.0f, 0.0f, 0.0f, 0.0f);
+
+		if (params->preview != 0) {
+			float g0 = 0.08f;
+			outc = to_float4(g0, g0, g0, 1.0f);
+			for (int t = 0; t < params->tiles; t++) {
+				float sd = params->rOuter - sdPolyO(params, t, px, py);
+				float a = coverage(sd, soft);
+				if (a > 0.0f) {
+					float g = (t % 2 == 0) ? 0.34f : 0.26f;
+					float4 tc = to_float4(g, g, g, 1.0f);
+					if (t == params->active) tc = to_float4(0.42f, 0.37f, 0.10f, 1.0f);
+					float ring = a - coverage(sd - params->outline, soft);
+					float dm = digitMask(t + 1, px, py, params->tcx[t], params->tcy[t], params->digitSize);
+					float hl = _fmaxf(ring, dm);
+					float4 yel = to_float4(1.0f, 0.85f, 0.1f, 1.0f);
+					tc = tc * (1.0f - hl) + yel * hl;
+					outc = outc * (1.0f - a) + tc * a;
+				}
+			}
+		} else if (params->mode == 1) {
+			// Create Background: the clip (or the border color) with holes where the tiles are.
+			float holes = 0.0f;
+			for (int t = 0; t < params->tiles; t++) {
+				float sd = params->rOuter - sdPolyO(params, t, px, py);
+				holes = _fmaxf(holes, coverage(sd, soft));
+			}
+			float4 c;
+			if (params->useColor != 0) {
+				c = to_float4(params->bc[0] * params->bc[3], params->bc[1] * params->bc[3], params->bc[2] * params->bc[3], params->bc[3]);
+			} else {
+				c = _tex2DVecN(src, ((float)x + 0.5f) / W, ((float)y + 0.5f) / H, 15);
+			}
+			outc = c * (1.0f - holes);
+		} else {
+			// Create Tile: the clip placed into the active tile, with an optional border ring.
+			int t = params->active;
+			float tm = coverage(params->rOuter - sdPolyO(params, t, px, py), soft);
+			float cm = coverage(params->rContent - sdPolyC(params, px, py), soft);
+			cm = _fminf(cm, tm);
+			if (tm > 0.0f) {
+				float u = ((px - params->ccx) / params->scale) / W + 0.5f;
+				float v = ((py - params->ccy) / params->scale) / H + 0.5f;
+				float4 c = _tex2DVecN(src, u, v, 15);
+				if (params->fill != 0) {
+					float fa = params->fc[3];
+					float4 f = to_float4(params->fc[0] * fa, params->fc[1] * fa, params->fc[2] * fa, fa);
+					c = c + f * (1.0f - c.w);
+				}
+				float ba = params->bc[3];
+				float4 b = to_float4(params->bc[0] * ba, params->bc[1] * ba, params->bc[2] * ba, ba);
+				outc = c * cm + b * (tm - cm);
+			}
+		}
+		_tex2DVec4Write(dst, x, y, outc);
+	}
+}
+]]
+
+local function AddLabel(name, id, numInputs, open)
+	return self:AddInput(name, id, {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "LabelControl",
+		LBLC_DropDownButton = true,
+		LBLC_NumInputs = numInputs,
+		INP_Default = open and 1 or 0,
+		INP_External = false,
+		INP_Passive = true,
+	})
+end
+
+local function AddColor(name, id, r, g, b, a, group)
+	local inputs = {}
+	local values = { r, g, b, a }
+	local suffix = { "Red", "Green", "Blue", "Alpha" }
+	for i = 1, 4 do
+		inputs[i] = self:AddInput(i == 1 and name or suffix[i], id .. suffix[i], {
+			ICS_Name = name,
+			LINKID_DataType = "Number",
+			INPID_InputControl = "ColorControl",
+			INP_Default = values[i],
+			INP_MinScale = 0.0,
+			INP_MaxScale = 1.0,
+			IC_ControlGroup = group,
+			IC_ControlID = i - 1,
+		})
+	end
+	return inputs
+end
+
+function Create()
+	InWorkflow = self:AddInput("Workflow", "Workflow", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "ComboControl",
+		INP_Default = 0,
+		INP_Integer = true,
+		{ CCS_AddString = "Create Tile" },
+		{ CCS_AddString = "Create Background" },
+	})
+	InPreview = self:AddInput("Preview Layout", "PreviewLayout", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "CheckboxControl",
+		INP_Default = 0,
+		INP_Integer = true,
+	})
+	InActive = self:AddInput("Active Tile", "ActiveTile", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "SliderControl",
+		INP_Default = 1,
+		INP_Integer = true,
+		INP_MinScale = 1,
+		INP_MaxScale = MAX_TILES,
+		INP_MinAllowed = 1,
+		INP_MaxAllowed = MAX_TILES,
+	})
+
+	AddLabel("Layout", "LayoutLabel", 7, true)
+	InTiles = self:AddInput("Tiles", "Tiles", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "SliderControl",
+		INP_Default = 2,
+		INP_Integer = true,
+		INP_MinScale = 2,
+		INP_MaxScale = MAX_TILES,
+		INP_MinAllowed = 1,
+		INP_MaxAllowed = MAX_TILES,
+	})
+	InAngle = self:AddInput("Angle", "Angle", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "ScrewControl",
+		INPID_PreviewControl = "AngleControl",
+		ACID_Center = "Center",
+		INP_Default = 45.0,
+		INP_MinScale = -90.0,
+		INP_MaxScale = 90.0,
+	})
+	InCenter = self:AddInput("Split Center", "Center", {
+		LINKID_DataType = "Point",
+		INPID_InputControl = "OffsetControl",
+		INPID_PreviewControl = "CrosshairControl",
+		INP_DefaultX = 0.5,
+		INP_DefaultY = 0.5,
+	})
+	InSpacing = self:AddInput("Spacing", "Spacing", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "SliderControl",
+		INP_Default = 0.0,
+		INP_MinScale = 0.0,
+		INP_MaxScale = 0.1,
+		INP_MinAllowed = 0.0,
+	})
+	InMargin = self:AddInput("Margins", "Margins", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "SliderControl",
+		INP_Default = 0.0,
+		INP_MinScale = 0.0,
+		INP_MaxScale = 0.2,
+		INP_MinAllowed = 0.0,
+	})
+	InRounding = self:AddInput("Rounding", "Rounding", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "SliderControl",
+		INP_Default = 0.0,
+		INP_MinScale = 0.0,
+		INP_MaxScale = 0.2,
+		INP_MinAllowed = 0.0,
+	})
+	InSoftness = self:AddInput("Edge Softness", "Softness", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "SliderControl",
+		INP_Default = 0.0,
+		INP_MinScale = 0.0,
+		INP_MaxScale = 0.05,
+		INP_MinAllowed = 0.0,
+	})
+
+	AddLabel("Resize Content", "ContentLabel", 5, true)
+	InFit = self:AddInput("Move With Tile", "MoveWithTile", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "ComboControl",
+		INP_Default = 2,
+		INP_Integer = true,
+		{ CCS_AddString = "Off" },
+		{ CCS_AddString = "Position Only" },
+		{ CCS_AddString = "Position and Scale" },
+	})
+	InZoom = self:AddInput("Zoom", "Zoom", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "SliderControl",
+		INP_Default = 1.0,
+		INP_MinScale = 0.25,
+		INP_MaxScale = 4.0,
+		INP_MinAllowed = 0.01,
+	})
+	InOffsetX = self:AddInput("Left/Right Offset", "OffsetX", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "SliderControl",
+		INP_Default = 0.0,
+		INP_MinScale = -1.0,
+		INP_MaxScale = 1.0,
+	})
+	InOffsetY = self:AddInput("Up/Down Offset", "OffsetY", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "SliderControl",
+		INP_Default = 0.0,
+		INP_MinScale = -1.0,
+		INP_MaxScale = 1.0,
+	})
+	InEdges = self:AddInput("Content Edges", "ContentEdges", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "ComboControl",
+		INP_Default = 0,
+		INP_Integer = true,
+		{ CCS_AddString = "Transparent" },
+		{ CCS_AddString = "Mirror" },
+		{ CCS_AddString = "Duplicate" },
+	})
+
+	AddLabel("Tile Styling", "StylingLabel", 12, true)
+	InBorder = self:AddInput("Border Width", "BorderWidth", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "SliderControl",
+		INP_Default = 0.0,
+		INP_MinScale = 0.0,
+		INP_MaxScale = 0.05,
+		INP_MinAllowed = 0.0,
+	})
+	InBorderEdges = self:AddInput("Border On Frame Edges", "BorderOnFrameEdges", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "CheckboxControl",
+		INP_Default = 0,
+		INP_Integer = true,
+	})
+	InBorderColor = AddColor("Border Color", "Border", 1, 1, 1, 1, 1)
+	InUseColor = self:AddInput("Background Uses Border Color", "BackgroundUsesBorderColor", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "CheckboxControl",
+		INP_Default = 0,
+		INP_Integer = true,
+	})
+	InFill = self:AddInput("Draw Fill", "DrawFill", {
+		LINKID_DataType = "Number",
+		INPID_InputControl = "CheckboxControl",
+		INP_Default = 0,
+		INP_Integer = true,
+	})
+	InFillColor = AddColor("Fill Color", "Fill", 0, 0, 0, 1, 2)
+
+	InImage = self:AddInput("Input", "Input", {
+		LINKID_DataType = "Image",
+		LINK_Main = 1,
+	})
+	OutImage = self:AddOutput("Output", "Output", {
+		LINKID_DataType = "Image",
+		LINK_Main = 1,
+	})
+end
+
+-- Keep the polygon side of the line n.p = c where sign * (n.p - c) >= 0.
+local function ClipHalfPlane(poly, nx, ny, c, sign)
+	local out = {}
+	local n = #poly
+	if n == 0 then return out end
+	for i = 1, n do
+		local a = poly[i]
+		local b = poly[(i % n) + 1]
+		local da = sign * (a[1] * nx + a[2] * ny - c)
+		local db = sign * (b[1] * nx + b[2] * ny - c)
+		if da >= 0 then out[#out + 1] = a end
+		if (da >= 0) ~= (db >= 0) then
+			local k = da / (da - db)
+			out[#out + 1] = { a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k }
+		end
+	end
+	return out
+end
+
+-- Tile t (1 = highest along the normal) as a convex polygon in centered pixel
+-- coordinates. stripInset moves the divider edges inward, frameInset the frame edges.
+local function TilePolygon(g, t, stripInset, frameInset)
+	local hw, hh = g.hw - frameInset, g.hh - frameInset
+	if hw <= 0 or hh <= 0 then return {} end
+	local poly = { { -hw, -hh }, { hw, -hh }, { hw, hh }, { -hw, hh } }
+	local lo, hi = g.lo[t], g.hi[t]
+	if lo > -BIG then poly = ClipHalfPlane(poly, g.nx, g.ny, lo + stripInset, 1) end
+	if hi < BIG then poly = ClipHalfPlane(poly, g.nx, g.ny, hi - stripInset, -1) end
+	if #poly > MAX_VERTS then
+		local trimmed = {}
+		for i = 1, MAX_VERTS do trimmed[i] = poly[i] end
+		poly = trimmed
+	end
+	return poly
+end
+
+local function Centroid(poly)
+	local a, cx, cy = 0, 0, 0
+	local n = #poly
+	for i = 1, n do
+		local p = poly[i]
+		local q = poly[(i % n) + 1]
+		local cross = p[1] * q[2] - q[1] * p[2]
+		a = a + cross
+		cx = cx + (p[1] + q[1]) * cross
+		cy = cy + (p[2] + q[2]) * cross
+	end
+	if math.abs(a) < 1e-6 then return 0, 0 end
+	return cx / (3 * a), cy / (3 * a)
+end
+
+-- Smallest scale at which a frame-sized clip centered on (cx, cy) still covers
+-- every vertex of the convex tile, and therefore the whole tile.
+local function CoverScale(poly, cx, cy, hw, hh)
+	local s = 0
+	for _, p in ipairs(poly) do
+		s = math.max(s, math.abs(p[1] - cx) / hw, math.abs(p[2] - cy) / hh)
+	end
+	return s
+end
+
+function Process(req)
+	local src = InImage:GetValue(req)
+	local W = src.DataWindow:Width()
+	local H = src.DataWindow:Height()
+	local unit = math.min(W, H)
+
+	local mode = InWorkflow:GetValue(req).Value
+	local preview = InPreview:GetValue(req).Value
+	local tiles = math.max(1, math.min(MAX_TILES, math.floor(InTiles:GetValue(req).Value + 0.5)))
+	local active = math.max(1, math.min(tiles, math.floor(InActive:GetValue(req).Value + 0.5)))
+	local angle = math.rad(InAngle:GetValue(req).Value)
+	local center = InCenter:GetValue(req)
+	local halfGap = 0.5 * InSpacing:GetValue(req).Value * unit
+	local margin = InMargin:GetValue(req).Value * unit
+	local rounding = InRounding:GetValue(req).Value * unit
+	local soft = math.max(1.0, InSoftness:GetValue(req).Value * unit)
+	local border = InBorder:GetValue(req).Value * unit
+	local borderEdges = InBorderEdges:GetValue(req).Value
+	local fit = InFit:GetValue(req).Value
+	local zoom = InZoom:GetValue(req).Value
+	local offX = InOffsetX:GetValue(req).Value * W
+	local offY = InOffsetY:GetValue(req).Value * H
+
+	-- Parallel dividers: the frame (inside the margins) is split into equal
+	-- strips along the divider normal, shifted so the middle passes the center.
+	local nx, ny = -math.sin(angle), math.cos(angle)
+	local g = { nx = nx, ny = ny, hw = 0.5 * W - margin, hh = 0.5 * H - margin, lo = {}, hi = {} }
+	local extent = math.abs(nx) * g.hw + math.abs(ny) * g.hh
+	local shift = nx * (center.X - 0.5) * W + ny * (center.Y - 0.5) * H
+	local function divider(k) return -extent + k * 2 * extent / tiles + shift end
+	for t = 1, tiles do
+		local j = tiles - t
+		g.lo[t] = (j == 0) and -BIG or divider(j)
+		g.hi[t] = (j == tiles - 1) and BIG or divider(j + 1)
+	end
+
+	-- Without spacing the tiles overlap slightly, so that two antialiased edges
+	-- stacked on different tracks do not leave a dark seam.
+	local seam = (halfGap <= 0) and (0.5 * soft + 1.0) or 0.0
+	local rContent = math.max(0.0, rounding - border)
+
+	local dst = Image({ IMG_Like = src, IMG_DeferAlloc = true })
+	if req:IsPreCalc() then
+		OutImage:Set(req, Image({ IMG_Like = dst, IMG_NoData = true }))
+		return
+	end
+
+	local node = DVIPComputeNode(req, "PowerCollageKernel", PowerCollageKernel, "PowerCollageParams", PowerCollageParams)
+	local params = node:GetParamBlock(PowerCollageParams)
+
+	params.width = W
+	params.height = H
+	params.mode = mode
+	params.preview = preview
+	params.tiles = tiles
+	params.active = active - 1
+	params.soft = soft
+	params.rOuter = rounding
+	params.rContent = rContent
+	params.outline = math.max(2.0, unit * 0.004)
+	params.digitSize = unit * 0.12
+
+	for t = 1, MAX_TILES do
+		params.nO[t - 1] = 0
+		params.tcx[t - 1] = 0
+		params.tcy[t - 1] = 0
+	end
+	for t = 1, tiles do
+		local poly = TilePolygon(g, t, halfGap - seam + rounding, rounding)
+		params.nO[t - 1] = #poly
+		for i, p in ipairs(poly) do
+			params.polyO[(t - 1) * 16 + (i - 1) * 2] = p[1]
+			params.polyO[(t - 1) * 16 + (i - 1) * 2 + 1] = p[2]
+		end
+		local cx, cy = Centroid(TilePolygon(g, t, halfGap, 0))
+		params.tcx[t - 1] = cx
+		params.tcy[t - 1] = cy
+	end
+
+	local frameBorder = (borderEdges == 1) and border or 0
+	local polyC = TilePolygon(g, active, halfGap - seam + border + rContent, frameBorder + rContent)
+	params.nC = #polyC
+	for i, p in ipairs(polyC) do
+		params.polyC[(i - 1) * 2] = p[1]
+		params.polyC[(i - 1) * 2 + 1] = p[2]
+	end
+
+	-- Content placement inside the active tile.
+	local tile = TilePolygon(g, active, halfGap, 0)
+	local ccx, ccy, scale = 0, 0, 1
+	if fit >= 1 then
+		ccx, ccy = Centroid(tile)
+	end
+	if fit == 2 then
+		scale = CoverScale(tile, ccx, ccy, 0.5 * W, 0.5 * H)
+		if scale <= 0 then scale = 1 end
+	end
+	params.ccx = ccx + offX
+	params.ccy = ccy + offY
+	params.scale = scale * zoom
+
+	params.fill = InFill:GetValue(req).Value
+	params.useColor = InUseColor:GetValue(req).Value
+	for i = 1, 4 do
+		params.bc[i - 1] = InBorderColor[i]:GetValue(req).Value
+		params.fc[i - 1] = InFillColor[i]:GetValue(req).Value
+	end
+
+	node:SetParamBlock(params)
+
+	local edges = InEdges:GetValue(req).Value
+	local addressMode = TEX_ADDRESS_MODE_BORDER
+	if edges == 1 then
+		addressMode = TEX_ADDRESS_MODE_MIRROR
+	elseif edges == 2 then
+		addressMode = TEX_ADDRESS_MODE_CLAMP
+	end
+	node:AddSampler("RowSampler", TEX_FILTER_MODE_LINEAR, addressMode, TEX_NORMALIZED_COORDS_TRUE)
+	node:AddInput("src", src)
+	node:AddOutput("dst", dst)
+
+	local ok = node:RunSession(req)
+	if not ok then
+		dst = nil
+		dump(node:GetErrorLog())
+	end
+	OutImage:Set(req, dst)
+end
