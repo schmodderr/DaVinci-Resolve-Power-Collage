@@ -1,0 +1,6 @@
+*.o
+*.ofx
+*.ofx.bundle/
+.ofxsdk
+PowerCollageKernelSource.h
+pctest

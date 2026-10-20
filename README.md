@@ -25,6 +25,22 @@ Pfade für die manuelle Installation:
 - Windows: `%APPDATA%\Blackmagic Design\DaVinci Resolve\Support\Fusion\`
 - Linux: `~/.local/share/DaVinciResolve/Fusion/`
 
+## OpenFX-Plugin
+
+Dieselbe Collage gibt es auch als OpenFX-Plugin. Es erscheint im Effects-Reiter unter **Open FX > Power Collage**, genau wie Video Collage, und funktioniert auch auf der Color-Page. Im Viewer (Overlay "Open FX") lassen sich die Trennlinien direkt bearbeiten: am Kreuz ziehen verschiebt die Linien, am Kreis daneben ziehen dreht sie.
+
+Bauen und installieren (macOS, braucht Xcode und das OpenFX-SDK, das Resolve unter `/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/OpenFX` mitliefert):
+
+```bash
+cd OpenFX
+make
+sudo make install
+```
+
+Danach Resolve neu starten. Statt `install` verlinkt `sudo make link` den Systemordner einmalig auf den Build im Repository. Danach reicht nach jeder Änderung `make` und ein Neustart von Resolve.
+
+Das Plugin rechnet auf dem Mac per Metal auf der GPU. Auf anderen Systemen fällt es auf die CPU zurück, ein CUDA- oder OpenCL-Pfad fehlt noch. Ein Schlagschatten ist nicht eingebaut, dafür legst du in der Edit-Page zusätzlich das Resolve FX **Drop Shadow** auf den Clip.
+
 ## Workflow
 
 1. Lege die Clips übereinander auf V1, V2, und so weiter. Die Reihenfolge der Spuren ist egal, weil jeder Clip auf seine Kachel maskiert wird.
@@ -90,4 +106,5 @@ Längenangaben (Spacing, Margins, Rounding, Softness, Border Width) beziehen sic
 
 - `Fuses/PowerCollage.fuse`: Lua berechnet pro Frame die Kachel-Polygone, Schwerpunkte und die Skalierung. Ein GPU-Kernel übernimmt Maskierung, Kantenglättung, Rundung, Rand und das Sampling des Clips.
 - `Templates/Edit/Effects/Power Collage.setting`: Makro für die Effects Library der Edit-Page. Es enthält die Fuse plus Resolve FX Drop Shadow und veröffentlicht deren Parameter.
+- `OpenFX/`: das OpenFX-Plugin. `PowerCollageGeometry.h` entspricht dem Lua-Teil der Fuse. `PowerCollageKernel.inc` ist der Pixel-Kernel, der einmal geschrieben und sowohl als C++ (CPU) als auch als Metal (GPU) kompiliert wird. `PowerCollagePlugin.cpp` enthält Parameter, Rendering und das Viewer-Overlay.
 - `Testframes/`: zwei 9:16-Testbilder.
