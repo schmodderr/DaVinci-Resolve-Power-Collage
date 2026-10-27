@@ -6,6 +6,18 @@ Getestet mit DaVinci Resolve Studio 21.1.1 (macOS, Metal). Die Pixelberechnung l
 
 ## Installation
 
+Am einfachsten mit dem Installer-Skript, das direkt in Resolve läuft:
+
+1. `install.lua` herunterladen. Das ganze Repository ist nicht nötig, fehlende Dateien lädt das Skript selbst von GitHub.
+2. In Resolve **Workspace > Console** öffnen, oben auf **Lua** umschalten und eingeben:
+   ```lua
+   dofile("/Pfad/zu/install.lua")
+   ```
+3. Im Dialog auswählen, was installiert werden soll: den Fusion-Effekt, das OpenFX-Plugin (nur macOS, fragt nach dem Admin-Passwort) oder beides.
+4. Resolve neu starten.
+
+### Fusion-Effekt per Terminal
+
 ```bash
 ./install.sh
 ```
